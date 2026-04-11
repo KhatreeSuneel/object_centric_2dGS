@@ -1,190 +1,172 @@
-# 2D Gaussian Splatting for Geometrically Accurate Radiance Fields
+# 2D Gaussian Splatting for Geometrically Accurate 3D Object Reconstruction
 
-[Project page](https://surfsplatting.github.io/) | [Paper](https://arxiv.org/pdf/2403.17888) | [Video](https://www.youtube.com/watch?v=oaHCtB6yiKU) | [Surfel Rasterizer (CUDA)](https://github.com/hbb1/diff-surfel-rasterization) | [Surfel Rasterizer (Python)](https://colab.research.google.com/drive/1qoclD7HJ3-o0O1R8cvV3PxLhoDCMsH8W?usp=sharing) | [DTU+COLMAP (3.5GB)](https://drive.google.com/drive/folders/1SJFgt8qhQomHX55Q4xSvYE2C6-8tFll9) | [SIBR Viewer Pre-built for Windows](https://drive.google.com/file/d/1DRFrtFUfz27QvQKOWbYXbRS2o2eSgaUT/view?usp=sharing) | [Web Viewer](https://github.com/mkkellogg/GaussianSplats3D) <br>
+This repository builds upon [2D Gaussian Splatting (2DGS)](https://surfsplatting.github.io/) to achieve **efficient, geometrically accurate, object-centric 3D reconstruction** from multi-view images. By integrating segmentation masks directly into the optimization process, the method reconstructs only the target object — eliminating background Gaussians and significantly reducing training time.
 
-![Teaser image](assets/teaser.jpg)
+> **Lab Rotation Report** · Institut für Photogrammetrie und Fernerkundung (IPF), Karlsruher Institut für Technologie (KIT)
+> Supervised by Dr.-Ing. Markus Hillemann · Examiner: Prof. Dr.-Ing. Markus Ulrich
 
-This repo contains the official implementation for the paper "2D Gaussian Splatting for Geometrically Accurate Radiance Fields". Our work represents a scene with a set of 2D oriented disks (surface elements) and rasterizes the surfels with [perspective correct differentiable raseterization](https://colab.research.google.com/drive/1qoclD7HJ3-o0O1R8cvV3PxLhoDCMsH8W?usp=sharing). Our work also develops regularizations that enhance the reconstruction quality. We also devise meshing approaches for Gaussian splatting.
+---
 
+## Overview
 
-## ⭐ New Features 
-- 2024/07/20: Web-based viewer [GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D) also supports 2DGS. Thanks to [Mark Kellogg](https://github.com/mkkellogg)
-- 2024/07/19: [Colab Notebook](https://github.com/atakan-topaloglu/2d_gaussian_splatting_colab) is supported! Thanks to [atakan-topaloglu](https://github.com/atakan-topaloglu)
-- 2024/06/10: [SIBR Viewer](https://github.com/RongLiu-Leo/2d-gaussian-splatting) is supported!
-- 2024/06/05: [Remote Viewer](https://github.com/hwanhuh/2D-GS-Viser-Viewer) based on Viser is supported! Thanks to [HwanHeo](https://github.com/hwanhuh).
-- 2024/05/30:  Fixed a bug related to unbounded meshing. The foreground mesh quality should now be consistent with the bounded mesh.
-- 2024/05/17: Improve training speed by 30%~40% through the [cuda operator fusing](https://github.com/hbb1/diff-surfel-rasterization/pull/7). Please update the diff-surfel-rasterization submodule if you have already installed it. 
-    ```bash
-    git submodule update --remote  
-    pip install submodules/diff-surfel-rasterization
-    ```
-- 2024/05/05: Important updates - Now our algorithm supports **unbounded mesh extraction**!
-Our key idea is to contract the space into a sphere and then perform **adaptive TSDF truncation**. 
+Standard Gaussian Splatting pipelines (both 3DGS and 2DGS) reconstruct entire scenes, which is computationally wasteful when the goal is object-specific reconstruction. Extracting a clean mesh of a single object from a full-scene Gaussian representation is also non-trivial.
 
-![visualization](assets/unbounded.gif)
+This work introduces a **mask loss** using binary segmentation masks during the 2DGS optimization loop. The mask loss pushes the opacity of background Gaussians toward zero, which are then automatically pruned via density control — leaving only the target object. This approach achieves:
 
-## SIBR Viewer
+- **Sub-millimeter reconstruction accuracy** (comparable to full-scene 2DGS)
+- **~67% faster training** (≈3 min vs ≈9 min per scene)
+- **No post-processing mesh culling** — the output mesh contains only the target object
 
+### Method Overview
 
-https://github.com/RongLiu-Leo/2d-gaussian-splatting/assets/102014841/b75dd9a7-e3ee-4666-99ff-8c9121ff66dc
+The total optimization loss is:
 
-
-The Pre-built Viewer for Windows can be found [here](https://drive.google.com/file/d/1DRFrtFUfz27QvQKOWbYXbRS2o2eSgaUT/view?usp=sharing). If you use Ubuntu or want to check the viewer usage, please refer to [GS Monitor](https://github.com/RongLiu-Leo/Gaussian-Splatting-Monitor).
-### How to use
-Firstly open the viewer, 
-```shell
-<path to downloaded/compiled viewer>/bin/SIBR_remoteGaussian_app_rwdi
 ```
-and then
-```shell
-# Monitor the training process
-python train.py -s <path to COLMAP or NeRF Synthetic dataset> 
-# View the trained model
-python view.py -s <path to COLMAP or NeRF Synthetic dataset> -m <path to trained model> 
+L = Lc + α·Ld + β·Ln + δ·Lm
 ```
+
+where:
+- **Lc** — Photometric loss (L1 + D-SSIM)
+- **Ld** — Depth distortion regularization
+- **Ln** — Normal consistency regularization
+- **Lm** — Mask loss (binary cross-entropy between predicted alpha and object mask)
+
+Loss coefficients: `α = 100`, `β = 0.05`, `δ = 0.01`
+
+### Key Results
+
+| Method | Avg. Training Time | PSNR ↑ | SSIM ↑ | LPIPS ↓ |
+|---|---|---|---|---|
+| Ours (full mask) | **3:06** | 37.70 | 0.995 | 0.007 |
+| Ours (vis mask) | **3:02** | 35.07 | 0.994 | 0.009 |
+| 2DGS (scene) | 9:14 | 24.83 | 0.826 | 0.191 |
+| 2DGS (full mask) | 9:14 | 45.79 | 0.997 | 0.004 |
+| 2DGS (vis mask) | 9:14 | 47.19 | 0.998 | 0.003 |
+
+Mesh quality (signed distance vs. CAD model) is on par with 2DGS across all test objects, with both methods achieving average distances below 1 mm.
+
+---
 
 ## Installation
 
 ```bash
-# download
-git clone https://github.com/hbb1/2d-gaussian-splatting.git --recursive
+# Clone the repository (recursive for submodules)
+git clone https://github.com/<your-username>/<your-repo>.git --recursive
 
-# if you have an environment used for 3dgs, use it
-# if not, create a new environment
+# Create and activate environment
 conda env create --file environment.yml
 conda activate surfel_splatting
 ```
+
+---
+
+## Data Preparation
+
+The framework follows the same COLMAP-based input format as 2DGS. Your dataset should be structured as:
+
+```
+<location>
+|---images
+|   |---<image 0>
+|   |---<image 1>
+|   |---...
+|---masks
+|   |---<mask 0>
+|   |---<mask 1>
+|   |---...
+|---sparse
+    |---0
+        |---cameras.bin
+        |---images.bin
+        |---points3D.bin
+```
+
+**Masks** should be binary images where pixel value `1` indicates the object and `0` indicates background. Two mask types are supported:
+- **Full mask** — covers the entire object including occluded regions
+- **Visible mask** — covers only the visible (non-occluded) parts of the object
+
+If masks are not available for your dataset, they can be generated using [Segment Anything Model (SAM)](https://github.com/facebookresearch/segment-anything) or [SAM2](https://github.com/facebookresearch/segment-anything-2).
+
+For preparing your own COLMAP data, follow the instructions [here](https://github.com/graphdeco-inria/gaussian-splatting?tab=readme-ov-file#processing-your-own-scenes).
+
+---
+
 ## Training
-To train a scene, simply use
-```bash
-python train.py -s <path to COLMAP or NeRF Synthetic dataset>
-```
-Commandline arguments for regularizations
-```bash
---lambda_normal  # hyperparameter for normal consistency
---lambda_distortion # hyperparameter for depth distortion
---depth_ratio # 0 for mean depth and 1 for median depth, 0 works for most cases
-```
-**Tips for adjusting the parameters on your own dataset:**
-- For unbounded/large scenes, we suggest using mean depth, i.e., ``depth_ratio=0``,  for less "disk-aliasing" artifacts.
 
-## Testing
+To train on a scene with mask-guided object reconstruction:
+
+```bash
+python train.py -s <path to COLMAP dataset> --mask_path <path to masks>
+```
+
+Key regularization arguments (same as 2DGS):
+
+```bash
+--lambda_normal      # hyperparameter for normal consistency
+--lambda_distortion  # hyperparameter for depth distortion
+--depth_ratio        # 0 for mean depth, 1 for median depth (0 works for most cases)
+```
+
+All experiments were run for **30,000 iterations** on an RTX 4090 GPU.
+
+---
+
+## Mesh Extraction
+
 ### Bounded Mesh Extraction
-To export a mesh within a bounded volume, simply use
+
 ```bash
-python render.py -m <path to pre-trained model> -s <path to COLMAP dataset> 
+python render.py -m <path to trained model> -s <path to COLMAP dataset>
 ```
-Commandline arguments you should adjust accordingly for meshing for bounded TSDF fusion, use
+
+Adjust the following for TSDF fusion:
+
 ```bash
---depth_ratio # 0 for mean depth and 1 for median depth
---voxel_size # voxel size
---depth_trunc # depth truncation
+--depth_ratio   # 0 for mean depth, 1 for median depth
+--voxel_size    # voxel size for TSDF
+--depth_trunc   # depth truncation threshold
 ```
-If these arguments are not specified, the script will automatically estimate them using the camera information.
+
 ### Unbounded Mesh Extraction
-To export a mesh with an arbitrary size, we devised an unbounded TSDF fusion with space contraction and adaptive truncation.
+
 ```bash
-python render.py -m <path to pre-trained model> -s <path to COLMAP dataset> --mesh_res 1024
+python render.py -m <path to trained model> -s <path to COLMAP dataset> --mesh_res 1024
 ```
 
-## Quick Examples
-Assuming you have downloaded [MipNeRF360](https://jonbarron.info/mipnerf360/), simply use
+Since our method trains on the object only, the extracted mesh directly corresponds to the target object — no post-processing culling is required.
+
+---
+
+## Evaluation
+
+### Novel View Synthesis
+
 ```bash
-python train.py -s <path to m360>/<garden> -m output/m360/garden
-# use our unbounded mesh extraction!!
-python render.py -s <path to m360>/<garden> -m output/m360/garden --unbounded --skip_test --skip_train --mesh_res 1024
-# or use the bounded mesh extraction if you focus on foreground
-python render.py -s <path to m360>/<garden> -m output/m360/garden --skip_test --skip_train --mesh_res 1024
+python scripts/mipnerf_eval.py -m60 <path to dataset>
 ```
-If you have downloaded the [DTU dataset](https://drive.google.com/drive/folders/1SJFgt8qhQomHX55Q4xSvYE2C6-8tFll9), you can use
-```bash
-python train.py -s <path to dtu>/<scan105> -m output/date/scan105 -r 2 --depth_ratio 1
-python render.py -r 2 --depth_ratio 1 --skip_test --skip_train
-```
-**Custom Dataset**: We use the same COLMAP loader as 3DGS, you can prepare your data following [here](https://github.com/graphdeco-inria/gaussian-splatting?tab=readme-ov-file#processing-your-own-scenes). 
 
-## Full evaluation
-We provide scripts to evaluate our method of novel view synthesis and geometric reconstruction.
-<details>
-<summary><span style="font-weight: bold;">Explanation of Performance Differences to the Paper</span></summary>
+### Mesh Reconstruction
 
-We have re-implemented the repository for improved efficiency, which has slightly impacted performance compared to the original paper. Two factors have influenced this change:
+Mesh quality is evaluated against ground truth CAD models using signed distance metrics in [CloudCompare](https://www.danielgm.net/cc/).
 
-- 📈 We fixed some minor bugs, such as a half-pixel shift in TSDF fusion, resulting in improved geometry reconstruction.
+---
 
-- 📉 We removed the gradient of the low-pass filter used for densification, which reduces the number of Gaussians. As a result, the PSNR has slightly dropped, but we believe this trade-off is worthwhile for real-world applications.
+## Dataset
 
-You can report either the numbers from the paper or from this implementation, as long as they are discussed in a comparable setting.
-</details>
+Experiments were conducted on the [T-LESS dataset](https://bop.felk.cvut.cz/datasets/) — an RGB-D dataset for 6D pose estimation of texture-less objects. Five table-top scenes (scenes 10–17) were used, each containing a different target object in cluttered environments with varying levels of occlusion.
 
-#### Novel View Synthesis
-For novel view synthesis on [MipNeRF360](https://jonbarron.info/mipnerf360/) (which also works for other colmap datasets), use
-```bash
-python scripts/mipnerf_eval.py -m60 <path to the MipNeRF360 dataset>
-```
-We provide <a> Evaluation Results (Pretrained, Images)</a>. 
-<details>
-<summary><span style="font-weight: bold;">Table Results</span></summary>
-
-</details>
-
-#### Geometry reconstruction
-For geometry reconstruction on DTU dataset, please download the preprocessed data from [Drive](https://drive.google.com/drive/folders/1SJFgt8qhQomHX55Q4xSvYE2C6-8tFll9) or [Hugging Face](https://huggingface.co/datasets/dylanebert/2DGS). You also need to download the ground truth [DTU point cloud](https://roboimagedata.compute.dtu.dk/?page_id=36). 
-```bash
-python scripts/dtu_eval.py --dtu <path to the preprocessed DTU dataset>   \
-     --DTU_Official <path to the official DTU dataset>
-```
-We provide <a> Evaluation Results (Pretrained, Meshes)</a>. 
-<details>
-<summary><span style="font-weight: bold;">Table Results</span></summary>
-
-Chamfer distance on DTU dataset (lower is better)
-
-|   | 24   | 37   | 40   | 55   | 63   | 65   | 69   | 83   | 97   | 105  | 106  | 110  | 114  | 118  | 122  | Mean |
-|----------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|------|
-| Paper    | 0.48 | 0.91 | 0.39 | 0.39 | 1.01 | 0.83 | 0.81 | 1.36 | 1.27 | 0.76 | 0.70 | 1.40 | 0.40 | 0.76 | 0.52 | 0.80 |
-| Reproduce | 0.46 | 0.80 | 0.33 | 0.37 | 0.95 | 0.86 | 0.80 | 1.25 | 1.24 | 0.67 | 0.67 | 1.24 | 0.39 | 0.64 | 0.47 | 0.74 |
-</details>
-<br>
-
-For geometry reconstruction on TnT dataset, please download the preprocessed [TnT_data](https://huggingface.co/datasets/ZehaoYu/gaussian-opacity-fields/tree/main). You also need to download the ground truth [TnT_GT](https://www.tanksandtemples.org/download/), including ground truth point cloud, alignments and cropfiles.
-
-**Due to historical issue, you should use open3d==0.10.0 for evaluating TNT.**
-```bash
-# use open3d 0.18.0, skip metrics
-python scripts/tnt_eval.py --TNT_data <path to the preprocessed TNT dataset>   \
-     --TNT_GT <path to the official TNT evaluation dataset> --skip_metrics
-
-# use open3d 0.10.0, skip traing and rendering
-python scripts/tnt_eval.py --TNT_data <path to the preprocessed TNT dataset>   \
-     --TNT_GT <path to the official TNT evaluation dataset> --skip_training --skip_rendering
-```
-We provide <a> Evaluation Results (Pretrained, Meshes)</a>. 
-<details>
-<summary><span style="font-weight: bold;">Table Results</span></summary>
-
-F1 scores on TnT dataset (higher is better)
-
-|    | Barn   | Caterpillar | Ignatius | Truck  | Meetingroom | Courthouse | Mean | 
-|--------|--------|-------------|----------|--------|-------------|------------|------------|
-| Reproduce | 0.41  | 0.23      | 0.51   | 0.45 | 0.17      | 0.15      | 0.32 |
-</details>
-<br>
-
-
-## FAQ
-- **Training does not converge.**  If your camera's principal point does not lie at the image center, you may experience convergence issues. Our code only supports the ideal pinhole camera format, so you may need to make some modifications. Please follow the instructions provided [here](https://github.com/graphdeco-inria/gaussian-splatting/issues/144#issuecomment-1938504456) to make the necessary changes. We have also modified the rasterizer in the latest [commit](https://github.com/hbb1/diff-surfel-rasterization/pull/6) to support data accepted by 3DGS. To avoid further issues, please update to the latest commit.
-
-- **No mesh / Broken mesh.** When using the *Bounded mesh extraction* mode, it is necessary to adjust the `depth_trunc` parameter to perform TSDF fusion to extract meshes. On the other hand, *Unbounded mesh extraction* does not require tuning the parameters but is less efficient.  
-
-- **Can 3DGS's viewer be used to visualize 2DGS?** Technically, you can export 2DGS to 3DGS's ply file by appending an additional zero scale. However, due to the inaccurate affine projection of 3DGS's viewer, you may see some distorted artefacts. We are currently working on a viewer for 2DGS, so stay tuned for updates.
+---
 
 ## Acknowledgements
-This project is built upon [3DGS](https://github.com/graphdeco-inria/gaussian-splatting). The TSDF fusion for extracting mesh is based on [Open3D](https://github.com/isl-org/Open3D). The rendering script for MipNeRF360 is adopted from [Multinerf](https://github.com/google-research/multinerf/), while the evaluation scripts for DTU and Tanks and Temples dataset are taken from [DTUeval-python](https://github.com/jzhangbs/DTUeval-python) and [TanksAndTemples](https://github.com/isl-org/TanksAndTemples/tree/master/python_toolbox/evaluation), respectively. The fusing operation for accelerating the renderer is inspired by [Han's repodcue](https://github.com/Han230104/2D-Gaussian-Splatting-Reproduce). We thank all the authors for their great repos. 
 
+This project builds upon [2D Gaussian Splatting](https://github.com/hbb1/2d-gaussian-splatting) by Huang et al. The mask loss formulation is inspired by [GaussianObject](https://github.com/GaussianObject/GaussianObject). TSDF fusion is based on [Open3D](https://github.com/isl-org/Open3D).
+
+---
 
 ## Citation
-If you find our code or paper helps, please consider citing:
+
+If you find this work useful, please consider citing the original 2DGS paper:
+
 ```bibtex
 @inproceedings{Huang2DGS2024,
     title={2D Gaussian Splatting for Geometrically Accurate Radiance Fields},
