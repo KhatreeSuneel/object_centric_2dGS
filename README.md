@@ -51,7 +51,7 @@ Mesh quality (signed distance vs. CAD model) is on par with 2DGS across all test
 
 ```bash
 # Clone the repository (recursive for submodules)
-git clone https://github.com/<your-username>/<your-repo>.git --recursive
+git clone https://github.com/KhatreeSuneel/object_centric_2dGS.git --recursive
 
 # Create and activate environment
 conda env create --file environment.yml
