@@ -62,7 +62,7 @@ conda activate surfel_splatting
 
 ## Data Preparation
 
-The framework follows the same COLMAP-based input format as 2DGS. Your dataset should be structured as:
+The framework follows the same COLMAP-based input format as 2DGS. The dataset should be structured as:
 
 ```
 <location>
