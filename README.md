@@ -96,7 +96,7 @@ For preparing your own COLMAP data, follow the instructions [here](https://githu
 To train on a scene with mask-guided object reconstruction:
 
 ```bash
-python train.py -s <path to COLMAP dataset> --mask_path <path to masks>
+python train.py -s <path to COLMAP dataset> 
 ```
 
 Key regularization arguments (same as 2DGS):
@@ -139,10 +139,6 @@ Since our method trains on the object only, the extracted mesh directly correspo
 
 ## Evaluation
 
-### Novel View Synthesis
-
-```bash
-python scripts/mipnerf_eval.py -m60 <path to dataset>
 ```
 
 ### Mesh Reconstruction
